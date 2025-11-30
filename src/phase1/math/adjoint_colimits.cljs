@@ -11,16 +11,28 @@
 ;; ------------------------------------------------------------
 
 (defn make-diagram
-  "Placeholder: a diagram is a map of shape (a small category) to objects/morphisms
-  in a target category. Represent it minimally so we can experiment.
-  TODO: design a lightweight diagram type with arity-specific helpers."
+  "Minimal diagram representation.
+
+  - `shape` is a small category describing the shape of the diagram.
+  - `assignment` is a map with two keys:
+      :on-objects   -> function mapping each object in `shape` to an object
+                       in the target category.
+      :on-morphisms -> function mapping each morphism in `shape` to a morphism
+                       in the target category.
+
+  This keeps the data small but explicit enough to drive tests or visuals."
   [shape assignment]
   {:shape shape
    :assignment assignment})
 
 (defn cocone
   "Construct a cocone over a diagram.
-  TODO: encode the universal property for binary coproducts (A ⊕ B)."
+
+  - `apex`: the vertex object of the cocone.
+  - `legs`: a map object-in-diagram -> morphism into the apex.
+
+  This structure is intentionally plain so we can attach additional
+  properties (commutativity checks, universal witnesses) as needed."
   [apex legs]
   {:apex apex :legs legs})
 
@@ -28,17 +40,54 @@
 ;; Proto-colimits and exercises
 ;; ------------------------------------------------------------
 
+(defn- tag-left [x]
+  [:left x])
+
+(defn- tag-right [x]
+  [:right x])
+
+(defn- identity-morphism
+  "Identity morphism for a finite Set-like object: map each element to itself."
+  [object]
+  (into {} (map (fn [x] [x x]) object)))
+
+(defn- compose-maps
+  "Compose two function-as-maps g ∘ f. Domain of f must match keys of g's codomain."
+  [g f]
+  (into {} (map (fn [[k v]] [k (get g v)]) f)))
+
 (defn binary-coproduct
-  "Moore-Method TODO: implement a binary coproduct for a tiny category where
-  objects are keywords and morphisms are basic maps.
-  - Input: two objects a b in a category C
-  - Output: {:coprod c :injections [i1 i2]} such that for any other target t
-    and arrows f : a -> t, g : b -> t, there is a unique mediating arrow.
-  Hint: start with the Set-like category where objects are small sets and
-  morphisms are functions represented as Clojure maps.
+  "Binary coproduct in a finite Set-like category.
+
+  Objects are finite sets (Clojure sets); morphisms are total functions
+  represented as maps from domain elements to codomain elements.
+
+  Returns a map with:
+  - :coprod      the disjoint union of `a` and `b` via tagging.
+  - :injections  two morphisms a→coprod and b→coprod.
+  - :mediator    (fn [f g]) -> unique arrow from coprod to any target given
+                  legs f : a→t and g : b→t.
+  - :universal?  predicate that checks the universal property for supplied legs.
   "
   [category a b]
-  (throw (ex-info "TODO: implement binary-coproduct" {:a a :b b})))
+  (let [coprod (into #{} (concat (map tag-left a) (map tag-right b)))
+        inj-a (into {} (map (fn [x] [x (tag-left x)]) a))
+        inj-b (into {} (map (fn [y] [y (tag-right y)]) b))
+        mediator (fn [f g]
+                   (into {}
+                         (concat (map (fn [x] [(tag-left x) (get f x)]) a)
+                                 (map (fn [y] [(tag-right y) (get g y)]) b))))
+        universal? (fn [target f g h]
+                     (let [mediating (mediator f g)
+                           left (compose-maps h inj-a)
+                           right (compose-maps h inj-b)]
+                       (and (= left f)
+                            (= right g)
+                            (= mediating h))))]
+    {:coprod coprod
+     :injections [inj-a inj-b]
+     :mediator mediator
+     :universal? universal?}))
 
 ;; ------------------------------------------------------------
 ;; Adjoint functors (sketch)
@@ -52,13 +101,62 @@
   [name on-objects on-morphisms]
   (->Functor name on-objects on-morphisms))
 
+(defn tagging-functor
+  "A concrete Set-endofunctor that tags every element with the functor name.
+
+  Think of this as adding a render-pass identifier to each layer in a scene."
+  [name]
+  (functor name
+           (fn [object]
+             (into #{} (map (fn [x] [name x]) object)))
+           (fn [morphism]
+             (into {}
+                   (map (fn [[k v]]
+                          [[name k] [name v]])
+                        morphism)))))
+
 (defn left-adjoint-preserves-coproducts?
-  "Given a functor F that is left adjoint to some G, verify on a finite example
-  that it preserves binary coproducts.
-  TODO: implement using `binary-coproduct` once filled in.
-  "
+  "Given a functor F that is left adjoint to some G, verify on a finite Set-like
+  example that it preserves binary coproducts.
+
+  We check that F(a ⊕ b) is isomorphic to F(a) ⊕ F(b) by explicitly building
+  the two candidate coproducts and supplying a pair of inverse morphisms.
+  Returns a map with the constructed data and a boolean :preserves? field."
   [F category a b]
-  (throw (ex-info "TODO: show that F preserves coproducts" {:functor (:name F)})))
+  (let [{:keys [coprod] :as ab-coprod} (binary-coproduct category a b)
+        Fa ((:on-objects F) a)
+        Fb ((:on-objects F) b)
+        F-coprod ((:on-objects F) coprod)
+        {:keys [coprod f-coprod-inj-left f-coprod-inj-right] :as Fs-coprod}
+        (let [{:keys [coprod injections]} (binary-coproduct category Fa Fb)]
+          {:coprod coprod
+           :f-coprod-inj-left (first injections)
+           :f-coprod-inj-right (second injections)})
+        phi (into {}
+                  (map (fn [element]
+                         (let [[tag payload] element
+                               [lr x] payload]
+                           (when-not (= tag (:name F))
+                             (throw (ex-info "Unexpected tag in functor output" {:element element})))
+                           [element (case lr
+                                      :left (tag-left [tag x])
+                                      :right (tag-right [tag x])
+                                      (throw (ex-info "Unexpected coproduct tag" {:lr lr :element element})))]))))
+                       F-coprod))
+        psi (into {}
+                  (map (fn [element]
+                         (let [[lr payload] element]
+                           [element [(:name F) [lr payload]]]))
+                       (:coprod Fs-coprod)))
+        id-F-coprod (identity-morphism F-coprod)
+        id-Fs-coprod (identity-morphism (:coprod Fs-coprod))
+        iso? (and (= id-F-coprod (compose-maps psi phi))
+                  (= id-Fs-coprod (compose-maps phi psi)))]
+    {:ab-coprod ab-coprod
+     :F-coprod F-coprod
+     :Fs-coprod Fs-coprod
+     :iso {:forward phi :backward psi}
+     :preserves? iso?}))
 
 ;; ------------------------------------------------------------
 ;; Concrete examples to flesh out next
