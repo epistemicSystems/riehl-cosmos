@@ -1,0 +1,18 @@
+{:source-paths
+ ["src" "test"]
+
+ :dependencies []
+
+ :builds
+ {:app {:target :browser
+        :output-dir "public/js"
+        :asset-path "/js"
+        :modules {:main {:entries [phase1.core]}}
+        :devtools {:http-root "public"
+                   :http-port 8000}}
+
+  :test {:target :node-test
+         :output-to "target/test.js"
+         :autorun true}}
+
+ :dev-http {8000 "public"}}
