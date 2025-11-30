@@ -1,0 +1,20 @@
+{
+  "name": "riehl-cosmos",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "watch:app": "shadow-cljs watch app",
+    "watch:test": "shadow-cljs watch test",
+    "compile:test": "shadow-cljs compile test",
+    "test": "shadow-cljs run-tests test"
+  },
+  "dependencies": {
+    "d3": "^7.8.5",
+    "p5": "^1.9.0",
+    "reagent": "^1.2.0",
+    "three": "^0.163.0"
+  },
+  "devDependencies": {
+    "shadow-cljs": "^2.25.10"
+  }
+}
